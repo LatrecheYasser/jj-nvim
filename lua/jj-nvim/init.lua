@@ -16,7 +16,7 @@ local config = {
   -- sign characters used to display the diff
   sign = "|",
 
-  -- custom colors (only used when use_colorscheme = false)
+  -- custom colors extracted from the colorscheme,
   -- to set a color you can use something like this:
   -- add = { bg = "#1a3320", fg = "#8fd19e" },
   add = { link = "DiffAdd" },
