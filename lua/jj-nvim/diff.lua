@@ -27,20 +27,14 @@ local config = {
   delete = { link = "DiffDelete" },
 }
 
+-- module-level state
 local binary = "jj"
+local repo_root = nil
 
 local function set_highlights()
   vim.api.nvim_set_hl(0, HL_ADD, config.add or {})
   vim.api.nvim_set_hl(0, HL_CHANGE, config.change or {})
   vim.api.nvim_set_hl(0, HL_DELETE, config.delete or {})
-end
-
--- find_repo_root will try to find the .jj directory in the parent directories of the given path
-local function find_repo_root(path)
-  -- try to find the .jj folder
-  local found = vim.fs.find(".jj", { upward = true, path = vim.fs.dirname(path), type = "directory" })[1]
-  -- return the repo path
-  return found and vim.fs.dirname(found)
 end
 
 -- parse_changes will parse the diff lines and return the added, changed, and removed lines
@@ -132,6 +126,8 @@ local function apply_marks(bufnr, added_lines, updated_lines, removed_lines)
 end
 
 local function refresh(bufnr)
+  if not repo_root then return end
+
   bufnr = bufnr == 0 and vim.api.nvim_get_current_buf() or bufnr
 
   local bt = vim.api.nvim_get_option_value("buftype", { buf = bufnr })
@@ -139,12 +135,9 @@ local function refresh(bufnr)
   -- the buffer should be a normal file, and we also should have a path
   if bt ~= "" or path == "" then return end
 
-  local root = find_repo_root(path)
-  if not root then return end
-
   -- extracts the relative path of the file from the root.
-  local rel = path:sub(#root + 2)
-  local lines = vim.fn.systemlist({ binary, "-R", root, "diff", "--git", "--", rel })
+  local rel = path:sub(#repo_root + 2)
+  local lines = vim.fn.systemlist({ binary, "-R", repo_root, "diff", "--git", "--", rel })
 
   if vim.v.shell_error ~= 0 or #lines == 0 then
     vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
@@ -157,21 +150,12 @@ end
 M._config = config
 M.refresh = refresh
 
-function M.setup(opts, jj_binary)
+function M.setup(opts, jj_binary, jj_repo_root)
   config = vim.tbl_deep_extend("force", config, opts or {})
   binary = jj_binary or binary
+  repo_root = jj_repo_root
   set_highlights()
 
-  local group = vim.api.nvim_create_augroup("JJDiff", { clear = true })
-  vim.api.nvim_create_autocmd(config.update_events, {
-    group = group,
-    callback = function(e) refresh(e.buf) end,
-  })
-
-  vim.api.nvim_create_user_command("JJDiffRefresh", function()
-    refresh(0)
-  end, { desc = "Refresh jj diff highlights" })
 end
 
 return M
-
