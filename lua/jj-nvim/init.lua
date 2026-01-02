@@ -3,31 +3,40 @@ local M = {}
 local ns = vim.api.nvim_create_namespace("jj-nvim")
 local changes_line_matcher = "^@@ %-%d+,?%d* %+(%d+),?%d* @@"
 
+-- highlight group names
+local HL_ADD = "JJDiffAdd"
+local HL_CHANGE = "JJDiffChange"
+local HL_DELETE = "JJDiffDelete"
+
 local config = {
   -- the jj binary path to use
   binary = "jj",
-  -- the events to update the diff highlights
-  update_events = { "BufEnter", "BufWritePost" },
-
-  -- enable/disable features
-  enable_highlights = true,  -- show line background highlighting
-  enable_signs = true,       -- show signs in the sign column
-
-  -- sign characters used to display the diff
-  sign = "|",
-
-  -- custom colors extracted from the colorscheme,
-  -- to set a color you can use something like this:
-  -- add = { bg = "#1a3320", fg = "#8fd19e" },
-  add = { link = "DiffAdd" },
-  change = { link = "DiffChange" },
-  delete = { link = "DiffDelete" },
+  
+  -- diff highlights configuration
+  diff_highlight = {
+    -- the events to update the diff highlights
+    update_events = { "BufEnter", "BufWritePost" },
+    
+    -- enable/disable features
+    enable_highlights = true,  -- show line background highlighting
+    enable_signs = true,       -- show signs in the sign column
+    
+    -- sign characters used to display the diff for additions and changes
+    sign = "▎",
+    
+    -- custom colors extracted from the colorscheme,
+    -- to set a color you can use something like this:
+    -- add = { bg = "#1a3320", fg = "#8fd19e" },
+    add = { link = "DiffAdd" },
+    change = { link = "DiffChange" },
+    delete = { link = "DiffDelete" },
+  }
 }
 
 local function set_highlights()
-  vim.api.nvim_set_hl(0, "JJDiffAdd", config.add or {})
-  vim.api.nvim_set_hl(0, "JJDiffChange", config.change or {})
-  vim.api.nvim_set_hl(0, "JJDiffDelete", config.delete or {})
+  vim.api.nvim_set_hl(0, HL_ADD, config.diff_highlight.add or {})
+  vim.api.nvim_set_hl(0, HL_CHANGE, config.diff_highlight.change or {})
+  vim.api.nvim_set_hl(0, HL_DELETE, config.diff_highlight.delete or {})
 end
 
 -- find_repo_root will try to find the .jj directory in the parent directories of the given path
@@ -96,12 +105,12 @@ local function mark(bufnr, line_count, lnum, hl)
 
   local opts = { priority = 100 }
 
-  if config.enable_highlights then
+  if config.diff_highlight.enable_highlights and hl ~= HL_DELETE then
     opts.line_hl_group = hl
   end
 
-  if config.enable_signs then
-    opts.sign_text = config.sign
+  if config.diff_highlight.enable_signs then
+    opts.sign_text = config.diff_highlight.sign
     opts.sign_hl_group = hl
   end
 
@@ -115,15 +124,15 @@ local function apply_marks(bufnr, added_lines, updated_lines, removed_lines)
   if line_count == 0 then return end
 
   -- make sure we can display signs
-  if config.enable_signs then
+  if config.diff_highlight.enable_signs then
     for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
       vim.wo[win].signcolumn = "yes:1"
     end
   end
 
-  for _, l in ipairs(added_lines) do mark(bufnr, line_count, l, "JJDiffAdd") end
-  for _, l in ipairs(updated_lines) do mark(bufnr, line_count, l, "JJDiffChange") end
-  for _, l in ipairs(removed_lines) do mark(bufnr, line_count, l, "JJDiffDelete") end
+  for _, l in ipairs(added_lines) do mark(bufnr, line_count, l, HL_ADD) end
+  for _, l in ipairs(updated_lines) do mark(bufnr, line_count, l, HL_CHANGE) end
+  for _, l in ipairs(removed_lines) do mark(bufnr, line_count, l, HL_DELETE) end
 end
 
 
@@ -158,7 +167,7 @@ function M.setup(opts)
   set_highlights()
 
   local group = vim.api.nvim_create_augroup("JJDiff", { clear = true })
-  vim.api.nvim_create_autocmd(config.update_events, {
+  vim.api.nvim_create_autocmd(config.diff_highlight.update_events, {
     group = group,
     callback = function(e) refresh(e.buf) end,
   })
