@@ -10,6 +10,11 @@ local config = {
 
   -- diff highlights configuration
   diff_highlight = diff._config,
+
+  -- keymaps configuration (set to false to disable)
+  keymaps = {
+    bookmarks = "<leader>jjl",
+  },
 }
 
 local repo_root = nil
@@ -49,6 +54,15 @@ function M.setup(opts)
   vim.api.nvim_create_user_command("JJBookmarks", function()
     M.bookmarks()
   end, { desc = "Show jj bookmarks" })
+
+  -- Set up keymaps (if not disabled)
+  local km = config.keymaps
+  if km then
+    if km.bookmarks then
+      vim.keymap.set("n", km.bookmarks, M.bookmarks, { desc = "JJ: Show bookmarks" })
+    end
+  end
+  M.refresh()
 end
 
 return M

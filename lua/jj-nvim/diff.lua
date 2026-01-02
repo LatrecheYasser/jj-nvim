@@ -156,6 +156,15 @@ function M.setup(opts, jj_binary, jj_repo_root)
   repo_root = jj_repo_root
   set_highlights()
 
+  -- Create autocommands for auto-refresh
+  local group = vim.api.nvim_create_augroup("jj-nvim-diff", { clear = true })
+
+  vim.api.nvim_create_autocmd(config.update_events, {
+    group = group,
+    callback = function(args)
+      refresh(args.buf)
+    end,
+  })
 end
 
 return M
