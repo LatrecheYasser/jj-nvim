@@ -154,6 +154,7 @@ local function refresh(bufnr)
   apply_marks(bufnr, parse_changes(lines))
 end
 
+M._config = config
 M.refresh = refresh
 
 function M.setup(opts, jj_binary)
