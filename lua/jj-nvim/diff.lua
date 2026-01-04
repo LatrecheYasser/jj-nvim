@@ -149,20 +149,21 @@ local function apply_marks(bufnr, changes)
       vim.wo[win].signcolumn = "yes:1"
     end
   end
-  print("changes", vim.inspect(changes))
-  -- print the changes
   for _, change in ipairs(changes.added) do
-    print("added", change.start_line, change.end_line, table.concat(change.contents, "\n"))
+    for i = change.start_line, change.end_line do
+      mark(bufnr, line_count, i, HL_ADD)
+    end
   end
   for _, change in ipairs(changes.updated) do
-    print("updated", change.start_line, change.end_line, table.concat(change.old_contents, "\n"), table.concat(change.new_contents, "\n"))
+    for i = change.start_line, change.end_line do
+      mark(bufnr, line_count, i, HL_CHANGE)
+    end
   end
   for _, change in ipairs(changes.removed) do
-    print("removed", change.start_line, change.end_line, table.concat(change.contents, "\n"))
+    for i = change.start_line, change.end_line do
+      mark(bufnr, line_count, i, HL_DELETE)
+    end
   end
---   for _, l in ipairs(changes.added.line_numbers) do mark(bufnr, line_count, l, HL_ADD) end
---   for _, l in ipairs(changes.updated.line_numbers) do mark(bufnr, line_count, l, HL_CHANGE) end
---   for _, l in ipairs(changes.removed.line_numbers) do mark(bufnr, line_count, l, HL_DELETE) end
 end
 
 local function refresh(bufnr)
