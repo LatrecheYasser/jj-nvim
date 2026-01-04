@@ -14,6 +14,7 @@ local config = {
   -- keymaps configuration (set to false to disable)
   keymaps = {
     bookmarks = "<leader>jjl",
+    show_diff = "<leader>jjd",
   },
 }
 
@@ -27,6 +28,10 @@ function M.bookmarks()
   bookmarks.pick(config.binary, repo_root, function()
     diff.refresh(0)
   end)
+end
+
+function M.show_diff()
+  diff.show_old_version(0)
 end
 
 function M.setup(opts)
@@ -55,11 +60,18 @@ function M.setup(opts)
     M.bookmarks()
   end, { desc = "Show jj bookmarks" })
 
+  vim.api.nvim_create_user_command("JJShowDiff", function()
+    M.show_diff()
+  end, { desc = "Show old version of changed line" })
+
   -- Set up keymaps (if not disabled)
   local km = config.keymaps
   if km then
     if km.bookmarks then
       vim.keymap.set("n", km.bookmarks, M.bookmarks, { desc = "JJ: Show bookmarks" })
+    end
+    if km.show_diff then
+      vim.keymap.set("n", km.show_diff, M.show_diff, { desc = "JJ: Show old version of line" })
     end
   end
   M.refresh()

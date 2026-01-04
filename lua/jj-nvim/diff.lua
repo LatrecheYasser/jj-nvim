@@ -1,6 +1,7 @@
 local M = {}
 
 local ns = vim.api.nvim_create_namespace("jj-nvim-diff")
+local ns_preview = vim.api.nvim_create_namespace("jj-nvim-diff-preview")
 local changes_line_matcher = "^@@ %-%d+,?%d* %+(%d+),?%d* @@"
 
 -- highlight group names
@@ -30,6 +31,7 @@ local config = {
 -- module-level state
 local binary = "jj"
 local repo_root = nil
+local buffer_changes = {} -- store changes per buffer for lookup
 
 local function set_highlights()
   vim.api.nvim_set_hl(0, HL_ADD, config.add or {})
@@ -39,55 +41,83 @@ end
 
 -- parse_changes will parse the diff lines and return the added, changed, and removed lines
 local function parse_changes(lines)
-  local added_lines, updated_lines, removed_lines = {}, {}, {}
-  local in_diff, line_number = false, 0
-  local pending_removals = 0 -- track how many deletions without matching additions => updates
+  -- each one will store the start and end line number of the changes, and the content of the change. 
+  local added_changes, updated_changes, removed_changes = {}, {}, {}
+  
+  -- pending changes with start, end and content 
+  local pending_removals = { start_line = nil, end_line = nil, contents = {} } -- store content of pending removed lines
+  local pending_updates = { start_line = nil, end_line = nil, old_contents = {} , new_contents = {} } -- store content of pending updates
+  local pending_additions = { start_line = nil, end_line = nil, contents = {} } -- store content of pending additions
+  
+  -- commit the pending changes to the changes tables
+  local function commit_pending_changes()
+    if #pending_removals.contents > 0 then
+        table.insert(removed_changes, pending_removals)
+        pending_removals = { start_line = nil, end_line = nil, contents = {} }
+    end
+    if #pending_updates.old_contents > 0 then
+        table.insert(updated_changes, pending_updates)
+        pending_updates = { start_line = nil, end_line = nil, old_contents = {} , new_contents = {} }
+    end 
+    if #pending_additions.contents > 0 then
+        table.insert(added_changes, pending_additions)
+        pending_additions = { start_line = nil, end_line = nil, contents = {} }
+    end
+end
 
+local in_diff, line_number = false, 0
   for _, line in ipairs(lines) do
     local start = line:match(changes_line_matcher)
     if start then
-      -- commit any pending removals from previous hunk
-      if pending_removals > 0 then
-        table.insert(removed_lines, math.max(line_number, 1))
-      end
-      in_diff, line_number, pending_removals = true, tonumber(start), 0
+      in_diff, line_number = true, tonumber(start)
     elseif in_diff then
       local c = line:sub(1, 1)
+      local content = line:sub(2) -- line content without +/- prefix
+
       if c == "+" then
-        if pending_removals > 0 then
-          -- this is a modification (had `-` before), not pure addition
-          table.insert(updated_lines, line_number)
-          pending_removals = pending_removals - 1
-        else
-          -- pure addition
-          table.insert(added_lines, line_number)
-        end
-        line_number = line_number + 1
+        -- if we have pending removals it means we have an update and it's not really a removal.
+        if #pending_removals.contents > 0 then
+            if #pending_updates.old_contents == 0 then
+                pending_updates.start_line = pending_removals.start_line
+            end
+            pending_updates.end_line = pending_removals.start_line
+            table.insert(pending_updates.old_contents, pending_removals.contents[1])
+            table.insert(pending_updates.new_contents, content)
+            -- update the pending removal, by incr the start, and remove the first content
+            pending_removals.contents = vim.list_slice(pending_removals.contents, 2)
+            pending_removals.start_line = pending_removals.start_line + 1
+            if #pending_removals.contents == 0 then
+                pending_removals = { start_line = nil, end_line = nil, contents = {} }
+            end
+        else 
+            if #pending_additions.contents == 0 then
+                pending_additions.start_line = line_number
+            end 
+            pending_additions.end_line = line_number
+            table.insert(pending_additions.contents, content)
+            line_number = line_number + 1
+        end 
       elseif c == "-" then
-        pending_removals = pending_removals + 1
-      elseif c == " " then
-        -- context line: commit any remaining pending removals as actual deletions
-        if pending_removals > 0 then
-          table.insert(removed_lines, line_number)
-          pending_removals = 0
+        if #pending_removals.contents == 0  then
+            pending_removals.start_line = line_number
         end
+        table.insert(pending_removals.contents, content)
+        pending_removals.end_line = line_number
         line_number = line_number + 1
-      else
-        -- other line (diff header, etc): commit pending removals
-        if pending_removals > 0 then
-          table.insert(removed_lines, line_number)
-          pending_removals = 0
-        end
+      elseif c == " " then
+        commit_pending_changes()
+        line_number = line_number + 1
       end
     end
   end
 
-  -- commit any remaining pending removals at end of diff
-  if pending_removals > 0 then
-    table.insert(removed_lines, line_number)
-  end
+  commit_pending_changes()
 
-  return added_lines, updated_lines, removed_lines
+  return {
+    added = added_changes,
+    updated = updated_changes,
+    removed = removed_changes,
+  }
 end
 
 local function mark(bufnr, line_count, lnum, hl)
@@ -107,7 +137,7 @@ local function mark(bufnr, line_count, lnum, hl)
   vim.api.nvim_buf_set_extmark(bufnr, ns, lnum - 1, 0, opts)
 end
 
-local function apply_marks(bufnr, added_lines, updated_lines, removed_lines)
+local function apply_marks(bufnr, changes)
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
 
@@ -119,10 +149,20 @@ local function apply_marks(bufnr, added_lines, updated_lines, removed_lines)
       vim.wo[win].signcolumn = "yes:1"
     end
   end
-
-  for _, l in ipairs(added_lines) do mark(bufnr, line_count, l, HL_ADD) end
-  for _, l in ipairs(updated_lines) do mark(bufnr, line_count, l, HL_CHANGE) end
-  for _, l in ipairs(removed_lines) do mark(bufnr, line_count, l, HL_DELETE) end
+  print("changes", vim.inspect(changes))
+  -- print the changes
+  for _, change in ipairs(changes.added) do
+    print("added", change.start_line, change.end_line, table.concat(change.contents, "\n"))
+  end
+  for _, change in ipairs(changes.updated) do
+    print("updated", change.start_line, change.end_line, table.concat(change.old_contents, "\n"), table.concat(change.new_contents, "\n"))
+  end
+  for _, change in ipairs(changes.removed) do
+    print("removed", change.start_line, change.end_line, table.concat(change.contents, "\n"))
+  end
+--   for _, l in ipairs(changes.added.line_numbers) do mark(bufnr, line_count, l, HL_ADD) end
+--   for _, l in ipairs(changes.updated.line_numbers) do mark(bufnr, line_count, l, HL_CHANGE) end
+--   for _, l in ipairs(changes.removed.line_numbers) do mark(bufnr, line_count, l, HL_DELETE) end
 end
 
 local function refresh(bufnr)
@@ -141,14 +181,94 @@ local function refresh(bufnr)
 
   if vim.v.shell_error ~= 0 or #lines == 0 then
     vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+    buffer_changes[bufnr] = nil
     return
   end
 
-  apply_marks(bufnr, parse_changes(lines))
+  local changes = parse_changes(lines)
+  buffer_changes[bufnr] = changes
+  apply_marks(bufnr, changes)
+end
+
+-- Show the old version of the line under cursor as virtual text
+local function show_old_version(bufnr)
+  bufnr = bufnr == 0 and vim.api.nvim_get_current_buf() or bufnr
+
+  -- Clear any existing preview
+  vim.api.nvim_buf_clear_namespace(bufnr, ns_preview, 0, -1)
+
+  local changes = buffer_changes[bufnr]
+
+  if not changes then
+    return
+  end
+
+  -- get the current line number 
+  local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
+  local old_content = {}
+  local change_type = nil
+  local prev_line_number = nil
+  -- Check if cursor is on an updated line
+  for i, lnum in ipairs(changes.updated.line_numbers) do
+    if lnum == cursor_line then
+      table.insert(old_content, changes.updated.lines[i])
+      change_type = "updated"
+      if not prev_line_number then
+        prev_line_number = lnum
+      elseif lnum == prev_line_number + 1 then
+        table.insert(old_content, changes.updated.lines[i])
+        prev_line_number = lnum
+      else 
+        break
+      end 
+    end
+  end
+
+  if not old_content then
+    vim.notify("[jj-nvim] No previous version for this line", vim.log.levels.INFO)
+    return
+  end
+
+  -- Show as virtual text below the current line
+  local hl = change_type == "updated" and HL_CHANGE or HL_DELETE
+  local prefix = change_type == "updated" and "- " or "✗ "
+
+  vim.api.nvim_buf_set_extmark(bufnr, ns_preview, cursor_line - 1, 0, {
+    virt_lines = { { { prefix .. old_content .. "  (press u to revert)", hl } } },
+    virt_lines_above = false,
+  })
+
+  -- Function to clean up preview and keymap
+  local function cleanup()
+    vim.api.nvim_buf_clear_namespace(bufnr, ns_preview, 0, -1)
+    pcall(vim.keymap.del, "n", "u", { buffer = bufnr })
+  end
+
+  -- Set up 'u' keymap to revert the line
+  vim.keymap.set("n", "u", function()
+    if change_type == "updated" then
+      -- Replace current line with old content
+      vim.api.nvim_buf_set_lines(bufnr, cursor_line - 1, cursor_line, false, { old_content })
+      vim.notify("[jj-nvim] Reverted line to previous version", vim.log.levels.INFO)
+    elseif change_type == "removed" then
+      -- Insert the removed line at the current position
+      vim.api.nvim_buf_set_lines(bufnr, cursor_line - 1, cursor_line - 1, false, { old_content })
+      vim.notify("[jj-nvim] Restored removed line", vim.log.levels.INFO)
+    end
+    cleanup()
+  end, { buffer = bufnr, nowait = true, desc = "JJ: Revert to old version" })
+
+  -- Clear on cursor move (but not on 'u' press)
+  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "BufLeave", "InsertEnter" }, {
+    buffer = bufnr,
+    once = true,
+    callback = cleanup,
+  })
 end
 
 M._config = config
 M.refresh = refresh
+M.show_old_version = show_old_version
 
 function M.setup(opts, jj_binary, jj_repo_root)
   config = vim.tbl_deep_extend("force", config, opts or {})
