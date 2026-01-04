@@ -70,6 +70,9 @@ local in_diff, line_number = false, 0
     local start = line:match(changes_line_matcher)
     if start then
       in_diff, line_number = true, tonumber(start)
+      if line_number < 1 then
+        line_number = 1
+      end
     elseif in_diff then
       local c = line:sub(1, 1)
       local content = line:sub(2) -- line content without +/- prefix
@@ -80,12 +83,13 @@ local in_diff, line_number = false, 0
             if #pending_updates.old_contents == 0 then
                 pending_updates.start_line = pending_removals.start_line
             end
-            pending_updates.end_line = pending_removals.start_line
+            pending_updates.end_line = line_number
             table.insert(pending_updates.old_contents, pending_removals.contents[1])
             table.insert(pending_updates.new_contents, content)
             -- update the pending removal, by incr the start, and remove the first content
             pending_removals.contents = vim.list_slice(pending_removals.contents, 2)
-            pending_removals.start_line = pending_removals.start_line + 1
+            pending_removals.start_line = line_number + 1   
+            pending_removals.end_line = pending_removals.start_line + #pending_removals.contents - 1
             if #pending_removals.contents == 0 then
                 pending_removals = { start_line = nil, end_line = nil, contents = {} }
             end
@@ -94,15 +98,14 @@ local in_diff, line_number = false, 0
                 pending_additions.start_line = line_number
             end 
             pending_additions.end_line = line_number
-            line_number = line_number + 1
         end 
+        line_number = line_number + 1
       elseif c == "-" then
         if #pending_removals.contents == 0  then
             pending_removals.start_line = line_number
         end
         table.insert(pending_removals.contents, content)
-        pending_removals.end_line = line_number
-        line_number = line_number + 1
+        pending_removals.end_line = pending_removals.start_line + #pending_removals.contents - 1
       elseif c == " " then
         commit_pending_changes()
         line_number = line_number + 1
@@ -141,7 +144,7 @@ local function apply_marks(bufnr, changes)
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
 
   if line_count == 0 then return end
-
+  print(vim.inspect(changes))
   -- make sure we can display signs
   if config.enable_signs then
     for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
@@ -159,7 +162,10 @@ local function apply_marks(bufnr, changes)
     end
   end
   for _, change in ipairs(changes.removed) do
-    for i = change.start_line, change.end_line do
+    -- clamp removal lines to buffer length (file may have shrunk)
+    local start_line = math.min(change.start_line, line_count)
+    local end_line = math.min(change.end_line, line_count)
+    for i = start_line, end_line do
       mark(bufnr, line_count, i, HL_DELETE)
     end
   end
@@ -191,9 +197,16 @@ local function refresh(bufnr)
 end
 
 -- checks if the line number is in the changes table and returns element of the change
-local function check_if_line_in_changes(line_number, changes)
+-- if line_count is provided, clamp the change bounds to it (for removals in shrunk files)
+local function check_if_line_in_changes(line_number, changes, line_count)
    for _, change in ipairs(changes) do
-    if line_number >= change.start_line and line_number <= change.end_line then
+    local start_line = change.start_line
+    local end_line = change.end_line
+    if line_count then
+      start_line = math.min(start_line, line_count)
+      end_line = math.min(end_line, line_count)
+    end
+    if line_number >= start_line and line_number <= end_line then
         return change
     end
    end 
@@ -215,8 +228,10 @@ local function show_old_version(bufnr)
 
   -- get the current line number 
   local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
   local is_removal = false
-  local change =  check_if_line_in_changes(cursor_line, changes.removed)
+  -- for removals, clamp to line_count since file may have shrunk
+  local change = check_if_line_in_changes(cursor_line, changes.removed, line_count)
   if change then
     is_removal = true
   else 
@@ -241,18 +256,17 @@ local function show_old_version(bufnr)
   vim.bo[float_buf].buftype = "nofile"
   vim.bo[float_buf].filetype = vim.bo[bufnr].filetype -- inherit syntax highlighting
 
-  -- Calculate window dimensions
-  local max_width = 0
-  for _, line in ipairs(contents) do
-    max_width = math.max(max_width, #line)
-  end
-  local width = math.min(math.max(max_width + 2, 20), vim.o.columns - 4)
+  -- Calculate window dimensions (full width of current window)
+  local win_width = vim.api.nvim_win_get_width(0)
+  local width = win_width - 2 -- account for border
   local height = math.min(#contents, 10)
+  local cursor_row = vim.api.nvim_win_get_cursor(0)[1]
 
   -- Open floating window
   local float_win = vim.api.nvim_open_win(float_buf, false, {
-    relative = "cursor",
-    row = 1,
+    relative = "win",
+    win = 0,
+    row = cursor_row,
     col = 0,
     width = width,
     height = height,
