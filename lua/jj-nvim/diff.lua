@@ -231,23 +231,48 @@ local function show_old_version(bufnr)
     return
   end
 
-  -- Show as virtual text below the current line
+  -- Show as floating window below the cursor
   local hl = is_removal and HL_DELETE or HL_CHANGE
-  local contents = is_removal and  change.contents or change.old_contents
+  local contents = is_removal and change.contents or change.old_contents
 
-  print(vim.inspect(contents))
-  local virt_lines = {}
-  for _, content in ipairs(contents) do
-    table.insert(virt_lines, { { content, hl } })
+  -- Create floating window buffer
+  local float_buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, contents)
+  vim.bo[float_buf].buftype = "nofile"
+  vim.bo[float_buf].filetype = vim.bo[bufnr].filetype -- inherit syntax highlighting
+
+  -- Calculate window dimensions
+  local max_width = 0
+  for _, line in ipairs(contents) do
+    max_width = math.max(max_width, #line)
   end
-  vim.api.nvim_buf_set_extmark(bufnr, ns_preview,  change.end_line-1, 0, {
-    virt_lines = virt_lines,
-    virt_lines_above = false,
+  local width = math.min(math.max(max_width + 2, 20), vim.o.columns - 4)
+  local height = math.min(#contents, 10)
+
+  -- Open floating window
+  local float_win = vim.api.nvim_open_win(float_buf, false, {
+    relative = "cursor",
+    row = 1,
+    col = 0,
+    width = width,
+    height = height,
+    style = "minimal",
+    border = "rounded",
+    title = is_removal and " Removed " or " Previous ",
+    title_pos = "center",
   })
+
+  -- Apply highlight to the window
+  vim.api.nvim_set_option_value("winhl", "Normal:" .. hl .. ",FloatBorder:" .. hl, { win = float_win })
 
   -- Function to clean up preview and keymap
   local function cleanup()
-    vim.api.nvim_buf_clear_namespace(bufnr, ns_preview, 0, -1)
+    if vim.api.nvim_win_is_valid(float_win) then
+      vim.api.nvim_win_close(float_win, true)
+    end
+    if vim.api.nvim_buf_is_valid(float_buf) then
+      vim.api.nvim_buf_delete(float_buf, { force = true })
+    end
     pcall(vim.keymap.del, "n", "u", { buffer = bufnr })
   end
 
