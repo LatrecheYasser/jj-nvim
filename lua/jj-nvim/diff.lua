@@ -47,7 +47,7 @@ local function parse_changes(lines)
   -- pending changes with start, end and content 
   local pending_removals = { start_line = nil, end_line = nil, contents = {} } -- store content of pending removed lines
   local pending_updates = { start_line = nil, end_line = nil, old_contents = {} , new_contents = {} } -- store content of pending updates
-  local pending_additions = { start_line = nil, end_line = nil, contents = {} } -- store content of pending additions
+  local pending_additions = { start_line = nil, end_line = nil} -- store content of pending additions
   
   -- commit the pending changes to the changes tables
   local function commit_pending_changes()
@@ -59,7 +59,7 @@ local function parse_changes(lines)
         table.insert(updated_changes, pending_updates)
         pending_updates = { start_line = nil, end_line = nil, old_contents = {} , new_contents = {} }
     end 
-    if #pending_additions.contents > 0 then
+    if pending_additions.start_line then
         table.insert(added_changes, pending_additions)
         pending_additions = { start_line = nil, end_line = nil, contents = {} }
     end
@@ -90,11 +90,10 @@ local in_diff, line_number = false, 0
                 pending_removals = { start_line = nil, end_line = nil, contents = {} }
             end
         else 
-            if #pending_additions.contents == 0 then
+            if not pending_additions.start_line then
                 pending_additions.start_line = line_number
             end 
             pending_additions.end_line = line_number
-            table.insert(pending_additions.contents, content)
             line_number = line_number + 1
         end 
       elseif c == "-" then
@@ -191,6 +190,16 @@ local function refresh(bufnr)
   apply_marks(bufnr, changes)
 end
 
+-- checks if the line number is in the changes table and returns element of the change
+local function check_if_line_in_changes(line_number, changes)
+   for _, change in ipairs(changes) do
+    if line_number >= change.start_line and line_number <= change.end_line then
+        return change
+    end
+   end 
+   return nil
+end 
+
 -- Show the old version of the line under cursor as virtual text
 local function show_old_version(bufnr)
   bufnr = bufnr == 0 and vim.api.nvim_get_current_buf() or bufnr
@@ -206,36 +215,33 @@ local function show_old_version(bufnr)
 
   -- get the current line number 
   local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
-  local old_content = {}
-  local change_type = nil
-  local prev_line_number = nil
-  -- Check if cursor is on an updated line
-  for i, lnum in ipairs(changes.updated.line_numbers) do
-    if lnum == cursor_line then
-      table.insert(old_content, changes.updated.lines[i])
-      change_type = "updated"
-      if not prev_line_number then
-        prev_line_number = lnum
-      elseif lnum == prev_line_number + 1 then
-        table.insert(old_content, changes.updated.lines[i])
-        prev_line_number = lnum
-      else 
-        break
-      end 
+  local is_removal = false
+  local change =  check_if_line_in_changes(cursor_line, changes.removed)
+  if change then
+    is_removal = true
+  else 
+    change = check_if_line_in_changes(cursor_line, changes.updated)
+    if change then
+      is_update = true
     end
   end
 
-  if not old_content then
+  if not change then
     vim.notify("[jj-nvim] No previous version for this line", vim.log.levels.INFO)
     return
   end
 
   -- Show as virtual text below the current line
-  local hl = change_type == "updated" and HL_CHANGE or HL_DELETE
-  local prefix = change_type == "updated" and "- " or "✗ "
+  local hl = is_removal and HL_DELETE or HL_CHANGE
+  local contents = is_removal and  change.contents or change.old_contents
 
-  vim.api.nvim_buf_set_extmark(bufnr, ns_preview, cursor_line - 1, 0, {
-    virt_lines = { { { prefix .. old_content .. "  (press u to revert)", hl } } },
+  print(vim.inspect(contents))
+  local virt_lines = {}
+  for _, content in ipairs(contents) do
+    table.insert(virt_lines, { { content, hl } })
+  end
+  vim.api.nvim_buf_set_extmark(bufnr, ns_preview,  change.end_line-1, 0, {
+    virt_lines = virt_lines,
     virt_lines_above = false,
   })
 
