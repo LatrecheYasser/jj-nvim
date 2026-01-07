@@ -134,12 +134,21 @@ local function mark(bufnr, line_count, lnum, hl)
   end
 
   if config.enable_signs then
-    if hl == HL_DELETE_AND_UPDATE then 
+    if hl == HL_DELETE_AND_UPDATE or hl == HL_DELETE_AND_ADD then 
       opts.sign_text = config.sign .. "_"
-    elseif hl == HL_DELETE_AND_ADD then
-      opts.sign_text = config.sign .. " " .. config.sign
+    elseif hl == HL_DELETE then
+      opts.sign_text = " _"
+    else 
+      opts.sign_text = config.sign
     end
-    opts.sign_hl_group = hl
+
+    if hl == HL_DELETE_AND_UPDATE then
+      opts.sign_hl_group = HL_CHANGE
+    elseif hl == HL_DELETE_AND_ADD then
+      opts.sign_hl_group = HL_ADD
+    else
+      opts.sign_hl_group = hl
+    end
   end
 
   vim.api.nvim_buf_set_extmark(bufnr, ns, lnum - 1, 0, opts)
