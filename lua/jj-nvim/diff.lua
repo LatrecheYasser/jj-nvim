@@ -42,7 +42,8 @@ local function set_highlights()
 end
 
 -- parse_changes will parse the diff lines and return the added, changed, and removed lines
-local function parse_changes(lines)
+local function parse_changes(bufnr, lines)
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
   -- each one will store the start and end line number of the changes, and the content of the change. 
   local added_changes, updated_changes, removed_changes = {}, {}, {}
   
@@ -54,6 +55,9 @@ local function parse_changes(lines)
   -- commit the pending changes to the changes tables
   local function commit_pending_changes()
     if #pending_removals.contents > 0 then
+        pending_removals.start_line = math.min(math.max(pending_removals.start_line-1, 1), line_count)
+        pending_removals.end_line = math.min(pending_removals.end_line, line_count)
+        vim.inspect("commit pending removals", pending_removals)
         table.insert(removed_changes, pending_removals)
         pending_removals = { start_line = nil, end_line = nil, contents = {} }
     end
@@ -116,16 +120,34 @@ local in_diff, line_number = false, 0
   end
 
   commit_pending_changes()
+  -- find overlaps between the removals and the updates and the additions
+  local removal_overlaps_updates = {}
+  for i, removal in ipairs(removed_changes) do
+    for _, update in ipairs(updated_changes) do
+      if removal.start_line <= update.end_line and removal.end_line >= update.start_line then
+        removal_overlaps_updates[removal.start_line] = { update = update, removal = removal }
+      end
+    end
+  end
 
+  local removal_overlaps_additions = {}
+  for i, removal in ipairs(removed_changes) do
+    for _, addition in ipairs(added_changes) do
+      if removal.start_line <= addition.end_line and removal.end_line >= addition.start_line then
+        removal_overlaps_additions[removal.start_line] = { addition = addition, removal = removal }
+      end
+    end
+  end
   return {
     added = added_changes,
     updated = updated_changes,
     removed = removed_changes,
+    removal_overlaps_updates = removal_overlaps_updates,
+    removal_overlaps_additions = removal_overlaps_additions,
   }
 end
 
-local function mark(bufnr, line_count, lnum, hl)
-  lnum = math.min(math.max(lnum, 1), line_count)
+local function mark(bufnr, lnum, hl)
 
   local opts = { priority = 100 }
 
@@ -150,8 +172,8 @@ local function mark(bufnr, line_count, lnum, hl)
       opts.sign_hl_group = hl
     end
   end
-
-  vim.api.nvim_buf_set_extmark(bufnr, ns, lnum - 1, 0, opts)
+  print("marking line ", lnum-1, " with hl ", hl, opts.sign_text)
+  vim.api.nvim_buf_set_extmark(bufnr, ns, lnum-1, 0, opts)
 end
 
 local function apply_marks(bufnr, changes)
@@ -159,72 +181,37 @@ local function apply_marks(bufnr, changes)
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
 
   if line_count == 0 then return end
-  print(vim.inspect(changes))
+  -- print(vim.inspect(changes))
   -- make sure we can display signs
   if config.enable_signs then
     for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
       vim.wo[win].signcolumn = "yes:1"
     end
   end
-  -- Build sets of lines for each change type
-  local added_lines = {}
-  local updated_lines = {}
-  
-  for _, change in ipairs(changes.added) do
-    for i = change.start_line, change.end_line do
-      added_lines[i] = true
-    end
-  end
-  
-  for _, change in ipairs(changes.updated) do
-    for i = change.start_line, change.end_line do
-      updated_lines[i] = true
-    end
-  end
-  
-  -- Find where removal anchors overlap with updates or additions
-  local delete_and_update = {}  -- lines with both delete and update
-  local delete_and_add = {}     -- lines with both delete and addition
-  local delete_only = {}        -- lines with only delete
-  
-  for _, removal in ipairs(changes.removed) do
-    -- anchor removal at start_line - 1 (the line before the gap)
-    local anchor = math.max(1, math.min(removal.start_line - 1, line_count))
-    removal._anchor = anchor
-    
-    if updated_lines[anchor] then
-      table.insert(delete_and_update, anchor)
-    elseif added_lines[anchor] then
-      table.insert(delete_and_add, anchor)
-    else
-      table.insert(delete_only, anchor)
-    end
-  end
   
   -- Apply marks
   for _, change in ipairs(changes.added) do
     for i = change.start_line, change.end_line do
-      mark(bufnr, line_count, i, HL_ADD)
+      mark(bufnr, i, HL_ADD)
     end
   end
   
   for _, change in ipairs(changes.updated) do
     for i = change.start_line, change.end_line do
-      mark(bufnr, line_count, i, HL_CHANGE)
+      mark(bufnr, i, HL_CHANGE)
     end
   end
-  
-  -- Mark delete-only lines (don't double-mark lines with updates/adds)
-  for _, lnum in ipairs(delete_only) do
-    mark(bufnr, line_count, lnum, HL_DELETE)
+
+  for _, removal in ipairs(changes.removed) do
+    mark(bufnr, removal.start_line, HL_DELETE)
   end
 
-  for _, lnum in ipairs(delete_and_update) do
-    mark(bufnr, line_count, lnum, HL_DELETE_AND_UPDATE)
+  for lnum, _ in pairs(changes.removal_overlaps_updates) do
+    mark(bufnr, lnum, HL_DELETE_AND_UPDATE)
   end
 
-  for _, lnum in ipairs(delete_and_add) do
-    mark(bufnr, line_count, lnum, HL_DELETE_AND_ADD)
+  for lnum, _ in pairs(changes.removal_overlaps_additions) do
+    mark(bufnr, lnum, HL_DELETE_AND_ADD)
   end
 end
 
@@ -248,7 +235,8 @@ local function refresh(bufnr)
     return
   end
 
-  local changes = parse_changes(lines)
+  local changes = parse_changes(bufnr, lines)
+  print(vim.inspect(changes))
   buffer_changes[bufnr] = changes
   apply_marks(bufnr, changes)
 end
