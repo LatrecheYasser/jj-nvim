@@ -8,6 +8,8 @@ local changes_line_matcher = "^@@ %-%d+,?%d* %+(%d+),?%d* @@"
 local HL_ADD = "JJDiffAdd"
 local HL_CHANGE = "JJDiffChange"
 local HL_DELETE = "JJDiffDelete"
+local HL_DELETE_AND_UPDATE = "JJDiffDeleteAndUpdate"
+local HL_DELETE_AND_ADD = "JJDiffDeleteAndAdd"
 
 local config = {
   -- the events to update the diff highlights
@@ -132,7 +134,11 @@ local function mark(bufnr, line_count, lnum, hl)
   end
 
   if config.enable_signs then
-    opts.sign_text = config.sign
+    if hl == HL_DELETE_AND_UPDATE then 
+      opts.sign_text = config.sign .. "_"
+    elseif hl == HL_DELETE_AND_ADD then
+      opts.sign_text = config.sign .. " " .. config.sign
+    end
     opts.sign_hl_group = hl
   end
 
@@ -151,23 +157,65 @@ local function apply_marks(bufnr, changes)
       vim.wo[win].signcolumn = "yes:1"
     end
   end
+  -- Build sets of lines for each change type
+  local added_lines = {}
+  local updated_lines = {}
+  
+  for _, change in ipairs(changes.added) do
+    for i = change.start_line, change.end_line do
+      added_lines[i] = true
+    end
+  end
+  
+  for _, change in ipairs(changes.updated) do
+    for i = change.start_line, change.end_line do
+      updated_lines[i] = true
+    end
+  end
+  
+  -- Find where removal anchors overlap with updates or additions
+  local delete_and_update = {}  -- lines with both delete and update
+  local delete_and_add = {}     -- lines with both delete and addition
+  local delete_only = {}        -- lines with only delete
+  
+  for _, removal in ipairs(changes.removed) do
+    -- anchor removal at start_line - 1 (the line before the gap)
+    local anchor = math.max(1, math.min(removal.start_line - 1, line_count))
+    removal._anchor = anchor
+    
+    if updated_lines[anchor] then
+      table.insert(delete_and_update, anchor)
+    elseif added_lines[anchor] then
+      table.insert(delete_and_add, anchor)
+    else
+      table.insert(delete_only, anchor)
+    end
+  end
+  
+  -- Apply marks
   for _, change in ipairs(changes.added) do
     for i = change.start_line, change.end_line do
       mark(bufnr, line_count, i, HL_ADD)
     end
   end
+  
   for _, change in ipairs(changes.updated) do
     for i = change.start_line, change.end_line do
       mark(bufnr, line_count, i, HL_CHANGE)
     end
   end
-  for _, change in ipairs(changes.removed) do
-    -- clamp removal lines to buffer length (file may have shrunk)
-    local start_line = math.min(change.start_line, line_count)
-    local end_line = math.min(change.end_line, line_count)
-    for i = start_line, end_line do
-      mark(bufnr, line_count, i, HL_DELETE)
-    end
+  
+  -- Mark delete-only lines (don't double-mark lines with updates/adds)
+  for _, lnum in ipairs(delete_only) do
+    mark(bufnr, line_count, lnum, HL_DELETE)
+  end
+
+  for _, lnum in ipairs(delete_and_update) do
+    mark(bufnr, line_count, lnum, HL_DELETE_AND_UPDATE)
+  end
+
+  for _, lnum in ipairs(delete_and_add) do
+    mark(bufnr, line_count, lnum, HL_DELETE_AND_ADD)
   end
 end
 
