@@ -13,7 +13,7 @@ local config = {
 
   -- keymaps configuration (set to false to disable)
   keymaps = {
-    bookmarks = "<leader>jjl",
+    bookmarks = "<leader>jjb",
     show_diff = "<leader>jjd",
   },
 }

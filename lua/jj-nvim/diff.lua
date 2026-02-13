@@ -172,7 +172,6 @@ local function mark(bufnr, lnum, hl)
       opts.sign_hl_group = hl
     end
   end
-  print("marking line ", lnum-1, " with hl ", hl, opts.sign_text)
   vim.api.nvim_buf_set_extmark(bufnr, ns, lnum-1, 0, opts)
 end
 
@@ -181,7 +180,6 @@ local function apply_marks(bufnr, changes)
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
 
   if line_count == 0 then return end
-  -- print(vim.inspect(changes))
   -- make sure we can display signs
   if config.enable_signs then
     for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
@@ -236,7 +234,6 @@ local function refresh(bufnr)
   end
 
   local changes = parse_changes(bufnr, lines)
-  print(vim.inspect(changes))
   buffer_changes[bufnr] = changes
   apply_marks(bufnr, changes)
 end
