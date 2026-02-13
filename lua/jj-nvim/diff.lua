@@ -274,55 +274,128 @@ local function show_old_version(bufnr)
   -- get the current line number 
   local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
   local line_count = vim.api.nvim_buf_line_count(bufnr)
-  local is_removal = false
-  -- for removals, clamp to line_count since file may have shrunk
-  local change = check_if_line_in_changes(cursor_line, changes.removed, line_count)
-  if change then
-    is_removal = true
-  else 
-    change = check_if_line_in_changes(cursor_line, changes.updated)
-    if change then
-      is_update = true
+  -- Added-only: do nothing
+  local add_change = check_if_line_in_changes(cursor_line, changes.added, line_count)
+  if add_change then return end
+
+  -- Detect update / removal
+  local update_change = check_if_line_in_changes(cursor_line, changes.updated, line_count)
+  local removal_change = check_if_line_in_changes(cursor_line, changes.removed, line_count)
+
+  -- Check if this update also has an overlapping removal (from overlaps table)
+  local overlapping_removal = nil
+  if update_change and changes.removal_overlaps_updates then
+    for _, pair in pairs(changes.removal_overlaps_updates) do
+      if pair.update == update_change then
+        overlapping_removal = pair.removal
+        break
+      end
     end
   end
 
-  if not change then
+  -- Build display lines and highlight mapping
+  local display_lines = {}
+  local highlights = {}
+  local title = "Previous"
+
+  if update_change and overlapping_removal then
+    title = "Updated + Removed"
+    -- old updated lines (orange)
+    for _, line in ipairs(update_change.old_contents or {}) do
+      table.insert(display_lines, line)
+      table.insert(highlights, HL_CHANGE)
+    end
+    -- spacer
+    table.insert(display_lines, "")
+    table.insert(highlights, nil)
+    -- removed lines (red)
+    for _, line in ipairs(overlapping_removal.contents or {}) do
+      table.insert(display_lines, line)
+      table.insert(highlights, HL_DELETE)
+    end
+  elseif update_change then
+    title = "Updated"
+    for _, line in ipairs(update_change.old_contents or {}) do
+      table.insert(display_lines, line)
+      table.insert(highlights, HL_CHANGE)
+    end
+  elseif removal_change then
+    title = "Removed"
+    for _, line in ipairs(removal_change.contents or {}) do
+      table.insert(display_lines, line)
+      table.insert(highlights, HL_DELETE)
+    end
+  else
     vim.notify("[jj-nvim] No previous version for this line", vim.log.levels.INFO)
     return
   end
 
-  -- Show as floating window below the cursor
-  local hl = is_removal and HL_DELETE or HL_CHANGE
-  local contents = is_removal and change.contents or change.old_contents
+  if #display_lines == 0 then
+    vim.notify("[jj-nvim] No previous version for this line", vim.log.levels.INFO)
+    return
+  end
 
   -- Create floating window buffer
   local float_buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, contents)
+  vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, display_lines)
   vim.bo[float_buf].buftype = "nofile"
   vim.bo[float_buf].filetype = vim.bo[bufnr].filetype -- inherit syntax highlighting
 
-  -- Calculate window dimensions (full width of current window)
-  local win_width = vim.api.nvim_win_get_width(0)
-  local width = win_width - 2 -- account for border
-  local height = math.min(#contents, 10)
-  local cursor_row = vim.api.nvim_win_get_cursor(0)[1]
+  -- Apply per-line highlights
+  for i, hl in ipairs(highlights) do
+    if hl then
+      vim.api.nvim_buf_add_highlight(float_buf, -1, hl, i - 1, 0, -1)
+    end
+  end
+
+  -- Calculate window dimensions (align to text column, not sign/number columns)
+  local win = vim.api.nvim_get_current_win()
+  local win_width = vim.api.nvim_win_get_width(win)
+  local wininfo = vim.fn.getwininfo(win)[1] or { textoff = 0 }
+  local textoff = wininfo.textoff or 0  -- columns taken by sign/number/fold columns
+  local width = math.max(20, math.min(win_width - textoff, win_width - 2))
+  local height = math.min(#display_lines, 15)
+  local cursor_row = vim.api.nvim_win_get_cursor(0)[1] - 1 -- row is 0-based for float
 
   -- Open floating window
   local float_win = vim.api.nvim_open_win(float_buf, false, {
     relative = "win",
     win = 0,
     row = cursor_row,
-    col = 0,
+    col = textoff,
     width = width,
     height = height,
     style = "minimal",
     border = "rounded",
-    title = is_removal and " Removed " or " Previous ",
+    title = " " .. title .. " ",
     title_pos = "center",
   })
 
   -- Apply highlight to the window
-  vim.api.nvim_set_option_value("winhl", "Normal:" .. hl .. ",FloatBorder:" .. hl, { win = float_win })
+  vim.api.nvim_set_option_value("winhl", "Normal:Normal,FloatBorder:FloatBorder", { win = float_win })
+
+  -- Revert logic for 'u'
+  local function revert()
+    if update_change and overlapping_removal then
+      if update_change.old_contents then
+        vim.api.nvim_buf_set_lines(bufnr, update_change.start_line - 1, update_change.end_line, false, update_change.old_contents)
+      end
+      if overlapping_removal.contents then
+        vim.api.nvim_buf_set_lines(bufnr, overlapping_removal.start_line - 1, overlapping_removal.start_line - 1, false, overlapping_removal.contents)
+      end
+      vim.notify("[jj-nvim] Reverted update and restored removed lines", vim.log.levels.INFO)
+    elseif update_change then
+      if update_change.old_contents then
+        vim.api.nvim_buf_set_lines(bufnr, update_change.start_line - 1, update_change.end_line, false, update_change.old_contents)
+        vim.notify("[jj-nvim] Reverted updated lines", vim.log.levels.INFO)
+      end
+    elseif removal_change then
+      if removal_change.contents then
+        vim.api.nvim_buf_set_lines(bufnr, removal_change.start_line - 1, removal_change.start_line - 1, false, removal_change.contents)
+        vim.notify("[jj-nvim] Restored removed lines", vim.log.levels.INFO)
+      end
+    end
+  end
 
   -- Function to clean up preview and keymap
   local function cleanup()
@@ -337,15 +410,7 @@ local function show_old_version(bufnr)
 
   -- Set up 'u' keymap to revert the line
   vim.keymap.set("n", "u", function()
-    if change_type == "updated" then
-      -- Replace current line with old content
-      vim.api.nvim_buf_set_lines(bufnr, cursor_line - 1, cursor_line, false, { old_content })
-      vim.notify("[jj-nvim] Reverted line to previous version", vim.log.levels.INFO)
-    elseif change_type == "removed" then
-      -- Insert the removed line at the current position
-      vim.api.nvim_buf_set_lines(bufnr, cursor_line - 1, cursor_line - 1, false, { old_content })
-      vim.notify("[jj-nvim] Restored removed line", vim.log.levels.INFO)
-    end
+    revert()
     cleanup()
   end, { buffer = bufnr, nowait = true, desc = "JJ: Revert to old version" })
 
