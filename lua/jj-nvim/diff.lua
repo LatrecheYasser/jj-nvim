@@ -223,9 +223,7 @@ local function refresh(bufnr)
   -- the buffer should be a normal file, and we also should have a path
   if bt ~= "" or path == "" then return end
 
-  -- extracts the relative path of the file from the root.
-  local rel = path:sub(#repo_root + 2)
-  local lines = vim.fn.systemlist({ binary, "-R", repo_root, "diff", "--git", "--", rel })
+  local lines = vim.fn.systemlist({ binary, "-R", repo_root, "diff", "--git", "--", path })
 
   if vim.v.shell_error ~= 0 or #lines == 0 then
     vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)

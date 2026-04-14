@@ -1,7 +1,6 @@
 local M = {}
 
 local bookmarks = require("jj-nvim.bookmarks")
-local utils = require("jj-nvim.utils")
 local diff = require("jj-nvim.diff")
 
 local config = {
@@ -36,19 +35,10 @@ end
 
 function M.setup(opts)
   config = vim.tbl_deep_extend("force", config, opts or {})
-  local bufnr = vim.api.nvim_get_current_buf()
 
-  local bt = vim.api.nvim_get_option_value("buftype", { buf = bufnr })
-  local path = vim.api.nvim_buf_get_name(bufnr)
-  -- the buffer should be a normal file, and we also should have a path
-  if bt ~= "" or path == "" then return end
-
-  repo_root = utils._find_repo_root(path)
-
-  if not repo_root then
-    vim.notify("[jj-nvim] Not in a jj repository - " .. path, vim.log.levels.WARN)
-    return
-  end
+  local root = vim.fn.system({ config.binary, "root" })
+  if vim.v.shell_error ~= 0 then return end
+  repo_root = vim.trim(root)
 
   diff.setup(config.diff_highlight, config.binary, repo_root)
 

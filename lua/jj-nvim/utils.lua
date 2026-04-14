@@ -1,13 +1,5 @@
 local M = {}
 
--- find_repo_root will try to find the .jj directory in the parent directories of the given path
-M._find_repo_root = function(path)
-  -- try to find the .jj folder
-  local found = vim.fs.find(".jj", { upward = true, path = path, type = "directory" })[1]
-  -- return the repo path
-  return found and vim.fs.dirname(found)
-end
-
 -- Create a centered floating window with ANSI color support
 function M.create_float(lines, width, title, footer)
   local height = math.min(#lines, 20)

@@ -36,14 +36,12 @@ local function get_bookmarks(binary)
       -- extract the name from the colored line
       local plain = line:gsub("\027%[[%d;]*m", "")
       local name = plain:match("^(%S+):")
-      -- get the last rev
-      local last_rev = get_bookmark_log(binary, name, 1,false)
-      local last_rev_id = nil
-      if last_rev and #last_rev > 0 then
-        last_rev_id = vim.split(last_rev[1], "%s+")[2]
-      end
-  
       if name then
+        local last_rev = get_bookmark_log(binary, name, 1, false)
+        local last_rev_id = nil
+        if last_rev and #last_rev > 0 then
+          last_rev_id = vim.split(last_rev[1], "%s+")[2]
+        end
         table.insert(bookmarks, { name = name, display = line, last_rev = last_rev_id })
       end
     end
