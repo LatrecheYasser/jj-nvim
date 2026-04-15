@@ -2,6 +2,7 @@ local M = {}
 
 local bookmarks = require("jj-nvim.bookmarks")
 local diff = require("jj-nvim.diff")
+local status = require("jj-nvim.status")
 
 local config = {
   -- the jj binary path to use
@@ -14,6 +15,7 @@ local config = {
   keymaps = {
     bookmarks = "<leader>jjb",
     show_diff = "<leader>jjd",
+    status = "<leader>jjs",
   },
 }
 
@@ -31,6 +33,10 @@ end
 
 function M.show_diff()
   diff.show_old_version(0)
+end
+
+function M.status()
+  status.show(config.binary, repo_root)
 end
 
 function M.setup(opts)
@@ -54,6 +60,10 @@ function M.setup(opts)
     M.show_diff()
   end, { desc = "Show old version of changed line" })
 
+  vim.api.nvim_create_user_command("JJStatus", function()
+    M.status()
+  end, { desc = "Show changed files" })
+
   -- Set up keymaps (if not disabled)
   local km = config.keymaps
   if km then
@@ -62,6 +72,9 @@ function M.setup(opts)
     end
     if km.show_diff then
       vim.keymap.set("n", km.show_diff, M.show_diff, { desc = "JJ: Show old version of line" })
+    end
+    if km.status then
+      vim.keymap.set("n", km.status, M.status, { desc = "JJ: Show changed files" })
     end
   end
   M.refresh()

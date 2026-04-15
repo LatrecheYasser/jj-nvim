@@ -148,6 +148,8 @@ local in_diff, line_number = false, 0
 end
 
 local function mark(bufnr, lnum, hl)
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  if lnum < 1 or lnum > line_count then return end
 
   local opts = { priority = 100 }
 
