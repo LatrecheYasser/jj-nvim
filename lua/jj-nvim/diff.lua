@@ -352,14 +352,12 @@ local function show_old_version(bufnr)
   local textoff = wininfo.textoff or 0  -- columns taken by sign/number/fold columns
   local width = math.max(20, math.min(win_width - textoff, win_width - 2))
   local height = math.min(#display_lines, 15)
-  local cursor_row = vim.api.nvim_win_get_cursor(0)[1] - 1 -- row is 0-based for float
 
-  -- Open floating window
+  -- Open floating window below the cursor
   local float_win = vim.api.nvim_open_win(float_buf, false, {
-    relative = "win",
-    win = 0,
-    row = cursor_row,
-    col = textoff,
+    relative = "cursor",
+    row = 1,
+    col = 0,
     width = width,
     height = height,
     style = "minimal",
