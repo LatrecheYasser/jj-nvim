@@ -1,6 +1,6 @@
 # jj-nvim
 
-A Neovim plugin for [Jujutsu (jj)](https://github.com/martinvonz/jj) version control, providing inline diff highlights, a diff preview with undo, and a bookmark picker.
+A Neovim plugin for [Jujutsu (jj)](https://github.com/martinvonz/jj) version control, providing inline diff highlights, a diff preview with undo, a bookmark picker, and a changed files panel.
 
 ## Features
 
@@ -26,9 +26,17 @@ Use `:JJShowDiff` (or the default keymap `<leader>jjd`) on any changed line to o
 
 While the preview is open, press `u` to **revert** the change (restores old content or re-inserts removed lines). The preview closes automatically when you move the cursor.
 
+### Changed Files Panel
+
+Use `:JJStatus` (or `<leader>jjs`) to open a floating panel showing all changed files in the current working copy. From the panel:
+
+- `<CR>` — open the file under the cursor
+- `d` — show the diff for the file in a side panel
+- `q` / `<Esc>` — close the panel
+
 ### Bookmark Picker
 
-Use `:JJBookmarks` (or `<leader>jjl`) to open a floating picker listing all jj bookmarks. From the picker:
+Use `:JJBookmarks` (or `<leader>jjb`) to open a floating picker listing all jj bookmarks. From the picker:
 
 - `<CR>` — create a new change on the selected bookmark
 - `l` — show the commit log for the selected bookmark in a side panel
@@ -38,7 +46,7 @@ Use `:JJBookmarks` (or `<leader>jjl`) to open a floating picker listing all jj b
 
 - Neovim >= 0.10
 - [jj](https://github.com/martinvonz/jj) installed and available in `$PATH`
-- Must be inside a jj repository (has a `.jj` directory)
+- Must be inside a jj repository
 
 ## Installation
 
@@ -106,8 +114,9 @@ require("jj-nvim").setup({
 
   -- Keymaps (set to false to disable all keymaps)
   keymaps = {
-    bookmarks = "<leader>jjl",
+    bookmarks = "<leader>jjb",
     show_diff = "<leader>jjd",
+    status = "<leader>jjs",
   },
 })
 ```
@@ -119,13 +128,15 @@ require("jj-nvim").setup({
 | `:JJDiffRefresh` | Manually refresh diff highlights for the current buffer |
 | `:JJShowDiff` | Show the old version of the line under the cursor |
 | `:JJBookmarks` | Open the bookmark picker |
+| `:JJStatus` | Show changed files panel |
 
 ## Keymaps
 
 | Keymap | Mode | Description |
 |---|---|---|
-| `<leader>jjl` | Normal | Open bookmark picker |
+| `<leader>jjb` | Normal | Open bookmark picker |
 | `<leader>jjd` | Normal | Show old version of current line |
+| `<leader>jjs` | Normal | Show changed files panel |
 | `u` | Normal | Revert change (only while diff preview is open) |
 
 ## License
